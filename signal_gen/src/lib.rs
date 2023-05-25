@@ -1,26 +1,13 @@
-use dft::Plan;
-use itertools::Itertools;
+use plotly::scatter_mapbox;
 use rand::Rng;
 use realfft::RealFftPlanner;
-use rustfft::{
-    num_complex::{Complex, Complex64},
-    num_traits::Zero,
-    FftPlanner,
-};
-use std::f64::consts::PI;
+use rustfft::{num_complex::Complex, FftPlanner};
+use std::{f64::consts::PI, time::Instant};
 
 // EVERYTHING BELOW THIS LINE IS STOLEN
 // ----------------------------------------------------------------------------
 
 /// Generate a random noise signal.
-///
-/// # Parameters:
-///
-/// `sample_rate`: The number of samples per second.
-///
-/// `duration`: The duration of the signal in seconds.
-///
-/// Returns a vector of random noise.
 pub fn gen_noise(sample_rate: usize, duration: usize) -> Vec<f64> {
     let mut rng = rand::thread_rng();
 
@@ -30,17 +17,6 @@ pub fn gen_noise(sample_rate: usize, duration: usize) -> Vec<f64> {
 }
 
 /// Generate a harmonic signal.
-///
-/// # Parameters
-/// `sample_rate`: The number of samples per second.
-///
-/// `duration`: The duration of the signal in seconds.
-///
-/// `frequency`: The base frequency of the signal in Hz.
-///  
-/// `harmonics`: The number of harmonics to include in the signal.  
-/// # Return
-/// Returns a vector of the harmonic signal.
 /// ```
 /// let signal = signal_gen::gen_freq(7,7,7,7);
 /// ```
@@ -83,20 +59,71 @@ pub fn scale_signal(signal: Vec<f64>, max_value: f64) -> Vec<f64> {
 
 /// Shift the phase of a signal.
 pub fn phase_shift_signal(signal: &Vec<f64>, shift_angle: f64) -> Vec<f64> {
-    let plan = Plan::new(dft::Operation::Forward, signal.len());
-    let mut data = signal
+    let timer = Instant::now();
+    let length = signal.len();
+    let len_sqrt = (length as f64).sqrt();
+
+    let mut planner = RealFftPlanner::<f64>::new();
+    let r2c = planner.plan_fft_forward(length);
+
+    let mut indata = signal.clone();
+    let mut spectrum = r2c.make_output_vec();
+    let mut scratch = r2c.make_scratch_vec();
+    r2c.process_with_scratch(&mut indata, &mut spectrum, &mut scratch)
+        .unwrap();
+
+    dbg!(timer.elapsed());
+
+    for x in &mut spectrum {
+        *x /= len_sqrt;
+        *x *= shift_angle.cos() + shift_angle.sin() * Complex::i();
+    }
+
+    dbg!(timer.elapsed());
+
+    spectrum[0].im = 0.;
+    spectrum.last_mut().unwrap().im = 0.;
+
+    let c2r = planner.plan_fft_inverse(length);
+    let mut outdata = c2r.make_output_vec();
+
+    c2r.process_with_scratch(&mut spectrum, &mut outdata, &mut scratch)
+        .unwrap();
+
+    for x in &mut outdata {
+        *x /= len_sqrt;
+    }
+
+    dbg!(timer.elapsed());
+    outdata
+}
+
+pub fn _phase_shift_signal(signal: &Vec<f64>, shift_angle: f64) -> Vec<f64> {
+    let timer = Instant::now();
+    let length = signal.len();
+    let len_sqrt = (length as f64).sqrt();
+
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(length);
+
+    let mut buffer = signal
         .iter()
-        .map(|&x| dft::c64::new(x, 0.))
+        .map(|&x| Complex::new(x, 0.))
         .collect::<Vec<_>>();
+    fft.process(&mut buffer);
 
-    dft::transform(&mut data, &plan);
+    for x in &mut buffer {
+        *x /= len_sqrt;
+        *x *= shift_angle.cos() + shift_angle.sin() * Complex::i();
+    }
 
-    let plan = Plan::new(dft::Operation::Inverse, signal.len());
-    dft::transform(&mut data, &plan);
+    let fft = planner.plan_fft_inverse(length);
+    fft.process(&mut buffer);
 
-    let data = data.iter().map(|x| x.re).collect::<Vec<_>>();
+    for x in &mut buffer {
+        *x /= len_sqrt;
+    }
 
-    assert_eq!(&signal[..3], &data[..3]);
-
-    data
+    dbg!(timer.elapsed());
+    buffer.iter().map(|x| x.re).collect()
 }
