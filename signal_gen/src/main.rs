@@ -53,7 +53,9 @@ fn main() {
             amp_max,
         );
 
-        plot.add_trace(Scatter::new(x_nums.clone(), i_data[..1000].to_vec()))
+        dbg!(i_data.len());
+
+        plot.add_trace(Scatter::new(x_nums.clone(), i_data[..2000].to_vec()))
     }
     //plot.add_trace(trace);
     let layout = Layout::new();
